@@ -1,23 +1,38 @@
 
+import "dotenv/config";
 import app from "./app";
+import {
+  connectToDatabase,
+  closeDatabaseConnection,
+} from "./config/database";
 
 const PORT = Number(process.env.PORT) || 5000;
 
-const server = app.listen(PORT, () => {
-  console.log(`🍕 PizzaHub server running on port ${PORT}`);
-  console.log(`Local API: http://localhost:${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/api/health`);
-});
+const startServer = async (): Promise<void> => {
+  try {
+    await connectToDatabase();
 
-// Graceful shutdown.
-const shutdown = (signal: string) => {
-  console.log(`${signal} received. Shutting down server...`);
+    const server = app.listen(PORT, () => {
+      console.log(`PizzaHub server running on port ${PORT}`);
+      console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
+    });
 
-  server.close(() => {
-    console.log("PizzaHub server closed.");
-    process.exit(0);
-  });
+    const shutdown = async (signal: string): Promise<void> => {
+      console.log(`${signal} received. Shutting down...`);
+
+      server.close(async () => {
+        await closeDatabaseConnection();
+        process.exit(0);
+      });
+    };
+
+    process.on("SIGINT", () => void shutdown("SIGINT"));
+    process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  } catch (error) {
+    console.error("Unable to start PizzaHub server:", error);
+    await closeDatabaseConnection();
+    process.exit(1);
+  }
 };
 
-process.on("SIGINT", () => shutdown("SIGINT"));
-process.on("SIGTERM", () => shutdown("SIGTERM"));
+void startServer();

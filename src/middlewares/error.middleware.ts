@@ -1,7 +1,7 @@
 
-import { NextFunction, Request, Response } from "express";
+import { Request, Response, NextFunction } from "express";
 
-export const errorHandler = (
+export const errorMiddleware = (
   error: Error,
   _req: Request,
   res: Response,
@@ -9,11 +9,18 @@ export const errorHandler = (
 ): void => {
   console.error("Server Error:", error);
 
-  res.status(500).json({
+  const statusCode =
+    "statusCode" in error &&
+    typeof error.statusCode === "number"
+      ? error.statusCode
+      : 500;
+
+  res.status(statusCode).json({
     success: false,
     message:
       process.env.NODE_ENV === "production"
-        ? "Internal Server Error"
+        ? "Internal server error"
         : error.message || "Something went wrong",
   });
 };
+

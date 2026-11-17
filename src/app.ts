@@ -6,8 +6,8 @@ import helmet from "helmet";
 
 import healthRoutes from "./routes/health.routes";
 import databaseRoutes from "./routes/database.routes";
-import notFoundMiddleware from "./middlewares/not-found.middleware";
-import errorMiddleware from "./middlewares/error.middleware";
+import { notFoundMiddleware } from "./middlewares/not-found.middleware";
+import { errorMiddleware } from "./middlewares/error.middleware";
 
 const app = express();
 
@@ -36,3 +36,4 @@ app.use(notFoundMiddleware);
 app.use(errorMiddleware);
 
 export default app;
+

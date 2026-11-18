@@ -29,12 +29,11 @@ app.use(express.json());
 
 app.use("/api", healthRoutes);
 app.use("/api/db", databaseRoutes);
-
-// Public menu routes
-app.use("/api/menu-items", menuRoutes);
-
-// Protected routes
 app.use("/api/protected", protectedRoutes);
+
+// Public menu browsing endpoint.
+// Only approved menu items are returned by this route.
+app.use("/api/menu-items", menuRoutes);
 
 app.get("/", (_req, res) => {
   res.status(200).json({

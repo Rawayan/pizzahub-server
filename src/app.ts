@@ -7,6 +7,7 @@ import helmet from "helmet";
 import healthRoutes from "./routes/health.routes";
 import databaseRoutes from "./routes/database.routes";
 import protectedRoutes from "./routes/protected.routes";
+import menuRoutes from "./routes/menu.routes";
 
 import { notFoundMiddleware } from "./middlewares/not-found.middleware";
 import { errorMiddleware } from "./middlewares/error.middleware";
@@ -28,6 +29,11 @@ app.use(express.json());
 
 app.use("/api", healthRoutes);
 app.use("/api/db", databaseRoutes);
+
+// Public menu routes
+app.use("/api/menu-items", menuRoutes);
+
+// Protected routes
 app.use("/api/protected", protectedRoutes);
 
 app.get("/", (_req, res) => {

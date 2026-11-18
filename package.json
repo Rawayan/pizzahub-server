@@ -1,4 +1,3 @@
-
 {
   "name": "pizzahub-server",
   "version": "1.0.0",
@@ -16,6 +15,7 @@
     "dotenv": "^16.4.7",
     "express": "^5.1.0",
     "helmet": "^8.1.0",
+    "jose": "^6.2.17",
     "jsonwebtoken": "^9.0.2",
     "mongodb": "^6.19.0",
     "zod": "^4.1.5"

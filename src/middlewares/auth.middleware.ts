@@ -1,6 +1,6 @@
 
 import { RequestHandler } from "express";
-import { Document } from "mongodb";
+import { Document, ObjectId } from "mongodb";
 import {
   createRemoteJWKSet,
   jwtVerify,
@@ -9,10 +9,8 @@ import {
 import { getDatabase } from "../config/database";
 import { AppRole } from "../types/auth.types";
 
-// Better Auth user documents use a string `id`.
-// MongoDB's default `_id` type is ObjectId.
 interface BetterAuthUserDocument extends Document {
-  id: string;
+  _id: ObjectId;
   email?: string;
   name?: string;
   role?: unknown;
@@ -26,7 +24,6 @@ const JWKS_URL = new URL(
   `${BETTER_AUTH_URL}/api/auth/jwks`
 );
 
-// jose caches the remote signing keys and refreshes when needed.
 const JWKS = createRemoteJWKSet(JWKS_URL);
 
 const isAppRole = (role: unknown): role is AppRole => {
@@ -91,12 +88,21 @@ export const authenticate: RequestHandler = async (
     return;
   }
 
+  // MongoDB user documents use ObjectId in the _id field.
+  if (!/^[0-9a-fA-F]{24}$/.test(userId)) {
+    res.status(401).json({
+      success: false,
+      message: "Invalid user ID in authentication token.",
+    });
+    return;
+  }
+
   try {
-    // Look up the Better Auth user by its string ID.
-    // Do not compare a string JWT subject against MongoDB's ObjectId _id.
     const user = await getDatabase()
       .collection<BetterAuthUserDocument>("users")
-      .findOne({ id: userId });
+      .findOne({
+        _id: new ObjectId(userId),
+      });
 
     if (!user) {
       res.status(401).json({
@@ -106,7 +112,6 @@ export const authenticate: RequestHandler = async (
       return;
     }
 
-    // Check the current account status on every protected request.
     if (user.isBlocked === true) {
       res.status(403).json({
         success: false,
@@ -141,7 +146,6 @@ export const authenticate: RequestHandler = async (
 
     next();
   } catch (error) {
-    // Database errors reach the central Express error handler.
     next(error);
   }
 };

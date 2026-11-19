@@ -8,6 +8,7 @@ import healthRoutes from "./routes/health.routes";
 import databaseRoutes from "./routes/database.routes";
 import protectedRoutes from "./routes/protected.routes";
 import menuRoutes from "./routes/menu.routes";
+import vendorRoutes from "./routes/vendor.routes";
 
 import { notFoundMiddleware } from "./middlewares/not-found.middleware";
 import { errorMiddleware } from "./middlewares/error.middleware";
@@ -31,9 +32,11 @@ app.use("/api", healthRoutes);
 app.use("/api/db", databaseRoutes);
 app.use("/api/protected", protectedRoutes);
 
-// Public menu browsing endpoint.
-// Only approved menu items are returned by this route.
+// Public menu browsing and item details.
 app.use("/api/menu-items", menuRoutes);
+
+// Authenticated vendor dashboard and menu management.
+app.use("/api/vendor", vendorRoutes);
 
 app.get("/", (_req, res) => {
   res.status(200).json({

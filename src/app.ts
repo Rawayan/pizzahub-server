@@ -1,4 +1,6 @@
+
 import "dotenv/config";
+
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -10,6 +12,7 @@ import menuRoutes from "./routes/menu.routes";
 import vendorRoutes from "./routes/vendor.routes";
 import orderRoutes from "./routes/order.routes";
 import customerRoutes from "./routes/customer.routes";
+import adminRoutes from "./routes/admin.routes";
 
 import { notFoundMiddleware } from "./middlewares/not-found.middleware";
 import { errorMiddleware } from "./middlewares/error.middleware";
@@ -36,14 +39,18 @@ app.use("/api/protected", protectedRoutes);
 // Public menu browsing and item details.
 app.use("/api/menu-items", menuRoutes);
 
-// Protected vendor features.
+// Vendor dashboard and menu management.
 app.use("/api/vendor", vendorRoutes);
 
-// Protected vendor order management.
+// Vendor order management.
 app.use("/api/orders", orderRoutes);
 
-// Protected customer dashboard and order management.
+// Customer dashboard and order management.
 app.use("/api/customer", customerRoutes);
+
+// Admin dashboard, user management, menu moderation,
+// and read-only transaction monitoring.
+app.use("/api/admin", adminRoutes);
 
 app.get("/", (_req, res) => {
   res.status(200).json({

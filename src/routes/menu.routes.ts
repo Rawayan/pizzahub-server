@@ -1,245 +1,301 @@
 
 import { Router, Request, Response, NextFunction } from "express";
-import { Filter, Sort } from "mongodb";
+import { Filter, ObjectId, Sort } from "mongodb";
 
 import { getMenuItemsCollection } from "../config/collections";
+import { getDatabase } from "../config/database";
 import { MenuItemDocument } from "../types/database.types";
 
 const router = Router();
 
+type MenuSortOption =
+  | "newest"
+  | "oldest"
+  | "price-low"
+  | "price-high"
+  | "name";
+
 const DEFAULT_LIMIT = 12;
-const MAX_LIMIT = 48;
+const MAX_LIMIT = 50;
 
 /**
- * Escape special regex characters to prevent user input
- * from changing the intended search pattern.
- */
-const escapeRegex = (value: string): string => {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-};
-
-/**
- * Parse and validate optional numeric query parameters.
- */
-const parsePrice = (
-  value: unknown
-): number | undefined | null => {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (typeof value !== "string" || value.trim() === "") {
-    return null;
-  }
-
-  const parsed = Number(value);
-
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return null;
-  }
-
-  return parsed;
-};
-
-/**
- * GET /api/menu-items
+ * GET /api/menu-items/:id
  *
- * Public endpoint for browsing approved menu items.
- *
- * Supported query parameters:
- * - search: Search by menu item name
- * - category: Filter by category
- * - minPrice: Minimum price
- * - maxPrice: Maximum price
- * - sort: newest | oldest | price-low | price-high | name
- * - page: Page number
- * - limit: Number of items per page
+ * Get details of one approved menu item.
  */
 router.get(
-  "/",
+  "/:id",
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const collection = getMenuItemsCollection();
+      const id = req.params.id;
 
-      // -----------------------------------------------
-      // 1. Read query parameters
-      // -----------------------------------------------
-
-      const search =
-        typeof req.query.search === "string"
-          ? req.query.search.trim().slice(0, 80)
-          : "";
-
-      const category =
-        typeof req.query.category === "string"
-          ? req.query.category.trim().slice(0, 60)
-          : "";
-
-      const sortBy =
-        typeof req.query.sort === "string"
-          ? req.query.sort
-          : "newest";
-
-      const minPrice = parsePrice(req.query.minPrice);
-      const maxPrice = parsePrice(req.query.maxPrice);
-
-      // -----------------------------------------------
-      // 2. Validate price filters
-      // -----------------------------------------------
-
-      if (minPrice === null || maxPrice === null) {
-        res.status(400).json({
-          success: false,
-          message: "Please provide valid non-negative price values.",
-        });
-        return;
-      }
-
+      // Express may type route parameters as string | string[].
       if (
-        minPrice !== undefined &&
-        maxPrice !== undefined &&
-        minPrice > maxPrice
+        typeof id !== "string" ||
+        !/^[0-9a-fA-F]{24}$/.test(id)
       ) {
         res.status(400).json({
           success: false,
-          message: "Minimum price cannot be greater than maximum price.",
+          message: "Invalid menu item ID.",
         });
         return;
       }
 
-      // -----------------------------------------------
-      // 3. Validate pagination
-      // -----------------------------------------------
+      const menuItemsCollection = getMenuItemsCollection();
 
-      const requestedPage = Number(req.query.page);
-      const requestedLimit = Number(req.query.limit);
-
-      const page =
-        Number.isInteger(requestedPage) && requestedPage > 0
-          ? Math.min(requestedPage, 100000)
-          : 1;
-
-      const limit =
-        Number.isInteger(requestedLimit) && requestedLimit > 0
-          ? Math.min(requestedLimit, MAX_LIMIT)
-          : DEFAULT_LIMIT;
-
-      const skip = (page - 1) * limit;
-
-      // -----------------------------------------------
-      // 4. Build MongoDB filter
-      // -----------------------------------------------
-
-      const filter: Filter<MenuItemDocument> = {
+      const item = await menuItemsCollection.findOne({
+        _id: new ObjectId(id),
         status: "approved",
-      };
+      });
 
-      // Search by menu item name.
-      if (search) {
-        filter.itemName = {
-          $regex: escapeRegex(search),
-          $options: "i",
-        };
+      if (!item) {
+        res.status(404).json({
+          success: false,
+          message: "Menu item not found or unavailable.",
+        });
+        return;
       }
 
-      // Filter by category.
-      if (category && category.toLowerCase() !== "all") {
-        filter.category = category;
-      }
+      const database = getDatabase();
 
-      // Filter by price range.
-      if (minPrice !== undefined || maxPrice !== undefined) {
-        const priceFilter: {
-          $gte?: number;
-          $lte?: number;
-        } = {};
-
-        if (minPrice !== undefined) {
-          priceFilter.$gte = minPrice;
+      const vendor = await database.collection("users").findOne(
+        {
+          _id: item.vendorId,
+        },
+        {
+          projection: {
+            _id: 1,
+            name: 1,
+            image: 1,
+            businessName: 1,
+          },
         }
+      );
 
-        if (maxPrice !== undefined) {
-          priceFilter.$lte = maxPrice;
-        }
-
-        filter.price = priceFilter;
-      }
-
-      // -----------------------------------------------
-      // 5. Configure sorting
-      // -----------------------------------------------
-
-      const sortOptions: Record<string, Sort> = {
-        newest: { createdAt: -1 },
-        oldest: { createdAt: 1 },
-        "price-low": { price: 1, createdAt: -1 },
-        "price-high": { price: -1, createdAt: -1 },
-        name: { itemName: 1 },
-      };
-
-      const sort: Sort =
-        sortOptions[sortBy] || sortOptions.newest;
-
-      // -----------------------------------------------
-      // 6. Retrieve menu items, count, and categories
-      // -----------------------------------------------
-
-      const [documents, total, categories] = await Promise.all([
-        collection
-          .find(filter)
-          .sort(sort)
-          .skip(skip)
-          .limit(limit)
-          .toArray(),
-
-        collection.countDocuments(filter),
-
-        collection.distinct("category", {
-          status: "approved",
-        }),
-      ]);
-
-      // -----------------------------------------------
-      // 7. Format menu item response
-      // -----------------------------------------------
-
-      const items = documents.map((item) => ({
-        id: item._id?.toString() || "",
+      const formattedItem = {
+        id: item._id?.toString(),
         itemName: item.itemName,
         category: item.category,
         description: item.description,
         price: item.price,
         location: item.location,
-        images: item.images || [],
+        images: item.images ?? [],
+        status: item.status,
+        createdAt: item.createdAt,
+        vendorId: item.vendorId.toString(),
+        vendor: vendor
+          ? {
+              id: vendor._id.toString(),
+              name: vendor.name ?? "PizzaHub Vendor",
+              image: vendor.image ?? null,
+              businessName:
+                vendor.businessName ?? vendor.name ?? "PizzaHub Vendor",
+            }
+          : null,
+      };
+
+      res.status(200).json({
+        success: true,
+        message: "Menu item details retrieved successfully.",
+        data: {
+          item: formattedItem,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * GET /api/menu-items
+ *
+ * Get approved menu items with search, filtering,
+ * sorting, and pagination.
+ *
+ * Query parameters:
+ * search, category, minPrice, maxPrice,
+ * sort, page, limit
+ */
+router.get(
+  "/",
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const menuItemsCollection = getMenuItemsCollection();
+
+      const search =
+        typeof req.query.search === "string"
+          ? req.query.search.trim()
+          : "";
+
+      const category =
+        typeof req.query.category === "string"
+          ? req.query.category.trim()
+          : "";
+
+      const minPriceValue =
+        typeof req.query.minPrice === "string"
+          ? Number(req.query.minPrice)
+          : undefined;
+
+      const maxPriceValue =
+        typeof req.query.maxPrice === "string"
+          ? Number(req.query.maxPrice)
+          : undefined;
+
+      const pageValue =
+        typeof req.query.page === "string"
+          ? Number(req.query.page)
+          : 1;
+
+      const limitValue =
+        typeof req.query.limit === "string"
+          ? Number(req.query.limit)
+          : DEFAULT_LIMIT;
+
+      const sortValue =
+        typeof req.query.sort === "string"
+          ? req.query.sort
+          : "newest";
+
+      const validSortOptions: MenuSortOption[] = [
+        "newest",
+        "oldest",
+        "price-low",
+        "price-high",
+        "name",
+      ];
+
+      if (
+        (minPriceValue !== undefined &&
+          (!Number.isFinite(minPriceValue) || minPriceValue < 0)) ||
+        (maxPriceValue !== undefined &&
+          (!Number.isFinite(maxPriceValue) || maxPriceValue < 0))
+      ) {
+        res.status(400).json({
+          success: false,
+          message: "Price filters must be valid non-negative numbers.",
+        });
+        return;
+      }
+
+      if (
+        minPriceValue !== undefined &&
+        maxPriceValue !== undefined &&
+        minPriceValue > maxPriceValue
+      ) {
+        res.status(400).json({
+          success: false,
+          message: "Minimum price cannot exceed maximum price.",
+        });
+        return;
+      }
+
+      const page =
+        Number.isInteger(pageValue) && pageValue > 0
+          ? pageValue
+          : 1;
+
+      const limit =
+        Number.isInteger(limitValue) && limitValue > 0
+          ? Math.min(limitValue, MAX_LIMIT)
+          : DEFAULT_LIMIT;
+
+      const sortOption: MenuSortOption = validSortOptions.includes(
+        sortValue as MenuSortOption
+      )
+        ? (sortValue as MenuSortOption)
+        : "newest";
+
+      // Public users can only see approved menu items.
+      const filter: Filter<MenuItemDocument> = {
+        status: "approved",
+      };
+
+      if (search) {
+        filter.$or = [
+          { itemName: { $regex: search, $options: "i" } },
+          { description: { $regex: search, $options: "i" } },
+          { category: { $regex: search, $options: "i" } },
+          { location: { $regex: search, $options: "i" } },
+        ];
+      }
+
+      if (category && category.toLowerCase() !== "all") {
+        filter.category = {
+          $regex: `^${category.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+          $options: "i",
+        };
+      }
+
+      if (minPriceValue !== undefined || maxPriceValue !== undefined) {
+        const priceFilter: {
+          $gte?: number;
+          $lte?: number;
+        } = {};
+
+        if (minPriceValue !== undefined) {
+          priceFilter.$gte = minPriceValue;
+        }
+
+        if (maxPriceValue !== undefined) {
+          priceFilter.$lte = maxPriceValue;
+        }
+
+        filter.price = priceFilter;
+      }
+
+      const sortOptions: Record<MenuSortOption, Sort> = {
+        newest: { createdAt: -1 },
+        oldest: { createdAt: 1 },
+        "price-low": { price: 1 },
+        "price-high": { price: -1 },
+        name: { itemName: 1 },
+      };
+
+      const skip = (page - 1) * limit;
+
+      const [items, total, categories] = await Promise.all([
+        menuItemsCollection
+          .find(filter)
+          .sort(sortOptions[sortOption])
+          .skip(skip)
+          .limit(limit)
+          .toArray(),
+
+        menuItemsCollection.countDocuments(filter),
+
+        menuItemsCollection.distinct("category", {
+          status: "approved",
+        }),
+      ]);
+
+      const formattedItems = items.map((item) => ({
+        id: item._id?.toString(),
+        itemName: item.itemName,
+        category: item.category,
+        description: item.description,
+        price: item.price,
+        location: item.location,
+        images: item.images ?? [],
         createdAt: item.createdAt,
       }));
-
-      // Return only valid, non-empty category names.
-      const cleanCategories = categories
-        .filter(
-          (value): value is string =>
-            typeof value === "string" &&
-            value.trim().length > 0
-        )
-        .map((value) => value.trim())
-        .sort((a, b) => a.localeCompare(b));
-
-      // -----------------------------------------------
-      // 8. Send successful response
-      // -----------------------------------------------
 
       res.status(200).json({
         success: true,
         message: "Menu items retrieved successfully.",
         data: {
-          items,
-          categories: cleanCategories,
-          total,
+          items: formattedItems,
+          categories: categories.filter(
+            (value): value is string => typeof value === "string"
+          ),
           pagination: {
             page,
             limit,
             total,
             totalPages: Math.ceil(total / limit),
+            hasNextPage: page * limit < total,
+            hasPreviousPage: page > 1,
           },
         },
       });

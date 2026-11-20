@@ -15,6 +15,7 @@ import customerRoutes from "./routes/customer.routes";
 import adminRoutes from "./routes/admin.routes";
 import subscriptionRoutes from "./routes/subscription.routes";
 import stripeWebhookRoutes from "./routes/stripe-webhook.routes";
+import usersRoutes from "./routes/users.routes";
 
 import { notFoundMiddleware } from "./middlewares/not-found.middleware";
 import { errorMiddleware } from "./middlewares/error.middleware";
@@ -38,6 +39,7 @@ app.use("/api/stripe", stripeWebhookRoutes);
 
 // Parse JSON for all normal API endpoints.
 app.use(express.json());
+app.use("/api/users", usersRoutes);
 
 app.use("/api", healthRoutes);
 app.use("/api/db", databaseRoutes);

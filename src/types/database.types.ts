@@ -1,4 +1,3 @@
-
 import { ObjectId } from "mongodb";
 
 export type UserRole = "customer" | "vendor" | "admin";
@@ -33,6 +32,7 @@ export interface UserDocument {
   businessName?: string;
   subscriptionPlan: SubscriptionPlan;
   subscriptionExpiresAt?: Date | null;
+  stripeCustomerId?: string;
 }
 
 export interface MenuItemDocument {

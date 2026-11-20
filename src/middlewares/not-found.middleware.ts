@@ -1,5 +1,9 @@
 
-import { Request, Response, NextFunction } from "express";
+import {
+  Request,
+  Response,
+  NextFunction,
+} from "express";
 
 export const notFoundMiddleware = (
   req: Request,
@@ -8,6 +12,10 @@ export const notFoundMiddleware = (
 ): void => {
   res.status(404).json({
     success: false,
-    message: `Route not found: ${req.method} ${req.originalUrl}`,
+    message: "The requested API endpoint was not found.",
+    path:
+      process.env.NODE_ENV === "production"
+        ? undefined
+        : req.originalUrl,
   });
 };

@@ -1,4 +1,3 @@
-
 import { Router, Request, Response, NextFunction } from "express";
 import { Filter, ObjectId } from "mongodb";
 
@@ -53,7 +52,8 @@ const VALID_STATUSES: OrderStatus[] = [
 ];
 
 const isValidObjectId = (value: string): boolean =>
-  ObjectId.isValid(value) && new ObjectId(value).toHexString() === value.toLowerCase();
+  ObjectId.isValid(value) &&
+  new ObjectId(value).toHexString() === value.toLowerCase();
 
 /**
  * Gets the authenticated customer's MongoDB ObjectId.
@@ -203,6 +203,148 @@ router.get(
 );
 
 /**
+ * POST /api/customer/orders
+ *
+ * Creates a pending order for one approved menu item.
+ * The customer and vendor IDs, item price, and order status
+ * are determined by the server rather than trusted from the client.
+ */
+router.post(
+  "/orders",
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const customerId = getCustomerObjectId(req);
+
+      if (!customerId) {
+        res.status(401).json({
+          success: false,
+          message: "Invalid or missing customer authentication.",
+        });
+        return;
+      }
+
+      const body = req.body as Record<string, unknown>;
+
+      const itemId =
+        typeof body.itemId === "string" ? body.itemId.trim() : "";
+
+      const deliveryDateValue =
+        typeof body.deliveryDate === "string"
+          ? body.deliveryDate.trim()
+          : "";
+
+      const deliveryAddress =
+        typeof body.deliveryAddress === "string"
+          ? body.deliveryAddress.trim()
+          : "";
+
+      const message =
+        typeof body.message === "string" ? body.message.trim() : "";
+
+      if (!isValidObjectId(itemId)) {
+        res.status(400).json({
+          success: false,
+          message: "A valid menu item is required.",
+        });
+        return;
+      }
+
+      const deliveryDate = new Date(deliveryDateValue);
+
+      if (
+        !deliveryDateValue ||
+        Number.isNaN(deliveryDate.getTime()) ||
+        deliveryDate < new Date(new Date().setHours(0, 0, 0, 0))
+      ) {
+        res.status(400).json({
+          success: false,
+          message:
+            "Please select a valid delivery date that is not in the past.",
+        });
+        return;
+      }
+
+      if (deliveryAddress.length < 10 || deliveryAddress.length > 500) {
+        res.status(400).json({
+          success: false,
+          message: "Delivery address must be between 10 and 500 characters.",
+        });
+        return;
+      }
+
+      if (message.length > 500) {
+        res.status(400).json({
+          success: false,
+          message: "Special instructions cannot exceed 500 characters.",
+        });
+        return;
+      }
+
+      const item = await getMenuItemsCollection().findOne({
+        _id: new ObjectId(itemId),
+        status: "approved",
+      });
+
+      if (!item) {
+        res.status(404).json({
+          success: false,
+          message:
+            "This menu item is unavailable or has not been approved.",
+        });
+        return;
+      }
+
+      const vendor = await getDatabase()
+        .collection<UserDocument>("users")
+        .findOne({
+          _id: item.vendorId,
+          role: "vendor",
+          isBlocked: { $ne: true },
+        });
+
+      if (!vendor) {
+        res.status(409).json({
+          success: false,
+          message: "This restaurant is currently unavailable.",
+        });
+        return;
+      }
+
+      const order: OrderDocument = {
+        itemId: item._id!,
+        vendorId: item.vendorId,
+        customerId,
+        deliveryDate,
+        deliveryAddress,
+        ...(message ? { message } : {}),
+        status: "pending",
+        createdAt: new Date(),
+      };
+
+      const result = await getOrdersCollection().insertOne(order);
+
+      const savedOrder: OrderDocument = {
+        ...order,
+        _id: result.insertedId,
+      };
+
+      const enrichedOrder = await enrichOrder(savedOrder);
+
+      res.status(201).json({
+        success: true,
+        message: "Your order has been placed successfully.",
+        data: {
+          order: enrichedOrder,
+          total: item.price,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
  * GET /api/customer/orders
  *
  * Returns the authenticated customer's order history.
@@ -225,6 +367,7 @@ router.get(
       }
 
       const rawStatus = req.query.status;
+
       const status =
         typeof rawStatus === "string" ? rawStatus : undefined;
 

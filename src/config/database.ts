@@ -6,12 +6,6 @@ import { createDatabaseIndexes } from "./database-indexes";
 const MONGODB_URI = process.env.MONGODB_URI;
 const DB_NAME = process.env.DB_NAME || "pizzahub";
 
-// Use the DNS server that successfully resolved MongoDB SRV records.
-const DNS_SERVERS = (process.env.DNS_SERVERS || "192.168.0.1")
-  .split(",")
-  .map((server) => server.trim())
-  .filter(Boolean);
-
 if (!MONGODB_URI) {
   throw new Error("MONGODB_URI is missing from the environment variables");
 }
@@ -23,10 +17,21 @@ export const connectToDatabase = async (): Promise<Db> => {
   if (database) return database;
 
   try {
-    // Configure DNS before MongoClient performs SRV resolution.
-    setServers(DNS_SERVERS);
+    // Only override DNS when explicitly configured.
+    // Otherwise, use the environment's default DNS resolver.
+    const configuredDnsServers = process.env.DNS_SERVERS;
 
-    console.log("Using DNS servers:", DNS_SERVERS);
+    if (configuredDnsServers) {
+      const dnsServers = configuredDnsServers
+        .split(",")
+        .map((server) => server.trim())
+        .filter(Boolean);
+
+      if (dnsServers.length > 0) {
+        setServers(dnsServers);
+        console.log("Using configured DNS servers:", dnsServers);
+      }
+    }
 
     client = new MongoClient(MONGODB_URI);
 

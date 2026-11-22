@@ -5,6 +5,8 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 
+import { connectToDatabase } from "./config/database";
+
 import healthRoutes from "./routes/health.routes";
 import databaseRoutes from "./routes/database.routes";
 import protectedRoutes from "./routes/protected.routes";
@@ -33,12 +35,24 @@ app.use(
   })
 );
 
-// IMPORTANT: Stripe needs the untouched raw request body.
-// Do not move this below express.json().
+// Connect to MongoDB before processing any API request.
+// This works for Vercel serverless requests and local Express requests.
+app.use(async (_req, _res, next) => {
+  try {
+    await connectToDatabase();
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// IMPORTANT: Stripe webhook must receive the original raw body.
+// Keep this before express.json().
 app.use("/api/stripe", stripeWebhookRoutes);
 
-// Parse JSON for all normal API endpoints.
+// Parse JSON for normal API endpoints.
 app.use(express.json());
+
 app.use("/api/users", usersRoutes);
 
 app.use("/api", healthRoutes);
@@ -51,7 +65,6 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/customer", customerRoutes);
 app.use("/api/admin", adminRoutes);
 
-// Vendor Premium subscription APIs.
 app.use("/api/vendor/subscription", subscriptionRoutes);
 
 app.get("/", (_req, res) => {

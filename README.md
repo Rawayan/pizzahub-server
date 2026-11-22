@@ -274,6 +274,93 @@ The backend API is deployed on Vercel.
 
 Configure all required production environment variables in Vercel before deploying.
 
+
+## Implementation Challenges: API Query Parameters and Middleware Flow
+
+### 1. Building Flexible Menu Search, Filtering, Sorting, and Pagination
+
+A key challenge was supporting multiple menu discovery controls through one list endpoint instead of creating a separate endpoint for every search or filter combination.
+
+**Endpoint:**
+
+```http
+GET /api/menu-items
+```
+
+Supported query parameters:
+
+| Parameter | Behavior |
+|---|---|
+| `search` | Case-insensitive search across `itemName`, `description`, `category`, and `location` |
+| `category` | Case-insensitive category filter; `all` skips this filter |
+| `minPrice` | Inclusive lower price bound |
+| `maxPrice` | Inclusive upper price bound |
+| `sort` | `newest`, `oldest`, `price-low`, `price-high`, or `name` |
+| `page` | 1-based page number; defaults to `1` |
+| `limit` | Page size; defaults to `12` and is capped at `50` |
+
+**Example request:**
+
+```http
+GET /api/menu-items?search=pepperoni&category=Classic&minPrice=300&maxPrice=900&sort=price-low&page=1&limit=12
+```
+
+The route builds a MongoDB filter from the supplied values and always restricts public menu results to approved items.
+
+It validates price values, rejects negative or non-numeric prices, and rejects a minimum price greater than the maximum. It then applies the selected sort order and calculates the pagination offset using:
+
+```ts
+const skip = (page - 1) * limit;
+```
+
+The item query, matching document count, and available category list are retrieved together. The response includes the items, categories, and pagination metadata such as total pages and whether a previous or next page exists.
+
+Other list endpoints use focused query filters where appropriate. For example, vendor order retrieval accepts `status` (including `all`), while admin transaction monitoring accepts `status`, `page`, and `limit`.
+
+### 2. Middleware Flow: From Incoming Request to Route Handler
+
+The Express application uses an intentional middleware order so that security, database access, Stripe signature verification, and normal JSON parsing work correctly.
+
+The request flow is:
+
+1. **Helmet:** Adds HTTP security headers.
+2. **CORS:** Allows the configured frontend origin, credentials, required HTTP methods, and headers.
+3. **MongoDB connection middleware:** Ensures the database connection is ready before an API route runs. Connection errors are passed to the centralized error handler.
+4. **Stripe webhook router:** Mounted at `/api/stripe` before `express.json()`. This is important because Stripe signature verification needs the original raw request body.
+5. **JSON body parser:** Parses JSON for regular API endpoints.
+6. **Route mounting:** Directs requests to the users, menu, vendor, orders, customer, admin, and vendor-subscription routers.
+7. **Not-found middleware:** Returns a structured 404 response when no route matches.
+8. **Central error middleware:** Formats errors into a consistent JSON response and avoids exposing internal server details in production.
+
+### 3. Authentication and Role Authorization
+
+Protected routers use two separate checks.
+
+**Authentication — `authenticate`:**
+
+- Reads the Bearer token from the Authorization header.
+- Verifies it against the Better Auth remote JWKS using the configured issuer and audience.
+- Validates the token subject.
+- Loads the user from MongoDB.
+- Rejects missing, invalid, or expired tokens, missing users, blocked accounts, and invalid roles.
+- Attaches verified user information to `req.authUser`.
+
+**Authorization — `authorizeRoles(...)`:**
+
+- Checks that the authenticated user's role is permitted for the requested route.
+- Returns HTTP 401 when authentication is missing.
+- Returns HTTP 403 when the authenticated user does not have the required role.
+
+Route handlers also scope database operations to the authenticated user's ID where ownership matters. For example, vendor order queries include the authenticated vendor's ID, preventing one vendor from retrieving or updating another vendor's orders by changing an order ID.
+
+### 4. Protecting Stripe Webhook Processing
+
+Stripe webhook handling is deliberately separated from ordinary JSON API parsing.
+
+The raw-body route verifies the `Stripe-Signature` header with the configured webhook signing secret before processing subscription events.
+
+Premium status is updated from verified webhook events, not from a frontend redirect or an unverified client request.
+
 ## Security Notes
 
 - Keep MongoDB credentials private.
